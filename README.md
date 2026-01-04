@@ -1,10 +1,10 @@
 # Amazon Reviews Container Pipeline
 
-A containerized data pipeline for processing and analyzing Amazon product reviews using Apache Airflow, Apache Spark, and PostgreSQL.
+A containerized data pipeline for processing and analyzing Amazon business reviews using Apache Airflow, Apache Spark, and PostgreSQL.
 
 ## Overview
 
-This project implements an end-to-end data pipeline that ingests, processes, and stores Amazon product reviews. The pipeline is fully containerized using Docker, making it easy to deploy and scale across different environments.
+This project implements an end-to-end data pipeline that ingests, processes, and stores Amazon business reviews. The pipeline is fully containerized using Docker, making it easy to deploy and scale across different environments.
 
 ## Architecture
 
