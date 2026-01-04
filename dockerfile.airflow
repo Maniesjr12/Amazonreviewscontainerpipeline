@@ -1,0 +1,70 @@
+# Use the official Airflow image as the base
+FROM apache/airflow:2.10.4
+
+# --- Environment Variables ---
+ENV SPARK_VERSION=4.0.1
+ENV HADOOP_VERSION=3
+ENV SPARK_HOME="/opt/spark"
+
+USER root
+
+# --- Setup Java and Base Dependencies ---
+# Install OpenJDK 17 and other utilities (like curl and procps)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openjdk-17-jdk curl procps wget \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Correct JAVA_HOME for Debian/Airflow base
+ENV JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" 
+# Add Java and Spark executables to the system path
+ENV PATH="${JAVA_HOME}/bin:${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
+# # Spark Master Configuration (used when this container runs the spark-submit command)
+# ENV SPARK_MASTER_PORT="7077"
+# ENV SPARK_MASTER_HOST="spark-master" 
+
+# Set PySpark-specific environment variables to use python3
+ENV PYSPARK_PYTHON="python3"
+ENV PYSPARK_DRIVER_PYTHON="python3"
+
+# --- Python Dependencies ---
+COPY requirements.txt /tmp/requirements.txt
+
+USER airflow
+
+# Install Airflow Spark provider, PySpark (matching SPARK_VERSION), and pandas.
+# Install all Python dependencies in a single, clean pip command
+RUN pip install --no-cache-dir \
+    apache-airflow-providers-apache-spark \
+    pyspark==$SPARK_VERSION \
+    pandas \
+    -r /tmp/requirements.txt
+
+
+USER root
+
+# --- Spark Installation (Client Binary Only) ---
+RUN mkdir -p ${SPARK_HOME}
+WORKDIR ${SPARK_HOME}
+
+# Download and unpack Spark distribution 
+RUN curl -sS https://dlcdn.apache.org/spark/spark-$SPARK_VERSION/spark-$SPARK_VERSION-bin-hadoop$HADOOP_VERSION.tgz -o spark.tgz \
+    && tar xvzf spark.tgz --directory ${SPARK_HOME} --strip-components 1 \
+    && rm -f spark.tgz
+
+# --- Configuration and JDBC ---
+# Copy spark-defaults.conf (must exist in your local directory)
+COPY ./spark-defaults.conf "${SPARK_HOME}/conf/"
+
+# Download PostgreSQL JDBC driver
+RUN wget -q -P ${SPARK_HOME}/jars/ https://jdbc.postgresql.org/download/postgresql-42.7.4.jar
+
+# Ensure the 'airflow' user owns the Spark directory
+RUN chown -R airflow ${SPARK_HOME}
+
+# Switch back to the 'airflow' user (best practice)
+USER airflow
+
+# Command to run the Airflow Webserver and Scheduler (for separate services, this is split)
+CMD ["airflow", "webserver"] 

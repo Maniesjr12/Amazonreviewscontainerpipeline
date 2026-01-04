@@ -1,0 +1,42 @@
+# Openjdk image has been deprecated so I am using vendor openjdk image
+FROM eclipse-temurin:17-jdk-jammy
+
+# --- Setup Base Dependencies ---
+USER root
+# Install utilities needed for download (curl) and monitoring (procps)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl procps wget \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Environment Variables ---
+ENV SPARK_VERSION=4.0.1
+ENV HADOOP_VERSION=3
+ENV SPARK_HOME="/opt/spark"
+
+
+# Add Spark executables to the system path
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+
+# Spark Master Configuration
+ENV SPARK_MASTER_PORT="7077"
+ENV SPARK_MASTER_HOST="spark-master"
+
+# --- Spark Installation ---
+RUN mkdir -p ${SPARK_HOME}
+WORKDIR ${SPARK_HOME}
+
+# Download and unpack Spark distribution (using -sS for quiet download)
+RUN curl -sS https://dlcdn.apache.org/spark/spark-$SPARK_VERSION/spark-$SPARK_VERSION-bin-hadoop$HADOOP_VERSION.tgz -o spark.tgz \
+    && tar xvzf spark.tgz --directory ${SPARK_HOME} --strip-components 1 \
+    && rm -f spark.tgz
+
+# --- Configuration and JDBC ---
+# Copy spark-defaults.conf (must exist in your local directory)
+COPY ./spark-defaults.conf "${SPARK_HOME}/conf/"
+
+# Download PostgreSQL JDBC driver
+RUN wget -q -P ${SPARK_HOME}/jars/ https://jdbc.postgresql.org/download/postgresql-42.7.4.jar
+
+# Expose Spark ports (Optional, but good practice for clarity)
+EXPOSE 7077 8080 8081 4040 18080

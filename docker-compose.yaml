@@ -1,0 +1,187 @@
+networks:
+  testing-network:
+    driver: bridge
+
+services:
+  # ------------------------------------------------------------------
+  # AIRFLOW SERVICES (Use dockerfile.airflow)
+  # ------------------------------------------------------------------
+  airflow-init:
+    build:
+      context: .
+      dockerfile: dockerfile.airflow
+    #image: my-airflow-spark-client
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    networks:
+      - testing-network
+    environment:
+      - AIRFLOW_UID=50000
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/postgres
+      - AIRFLOW__WEBSERVER__SECRET_KEY=yoursecretkeyIsHere3284
+      - AIRFLOW_CONN_SPARK_STANDALONE_CLIENT=spark://spark-master:7077
+      - SPARK_HOME=/opt/spark
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+    command: bash -c "airflow db migrate && airflow users create --username admin --firstname Airflow --lastname User --role Admin --email admin@example.com --password admin || true"
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: dockerfile.airflow
+    #image: my-airflow-spark-webserver
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      - airflow-init
+    networks:
+      - testing-network
+    ports:
+      - "8080:8080"
+    environment:
+      - AIRFLOW_UID=50000
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/postgres
+      - AIRFLOW__WEBSERVER__SECRET_KEY=yoursecretkey
+      - AIRFLOW_CONN_SPARK_STANDALONE_CLIENT=spark://spark-master:7077
+      - SPARK_HOME=/opt/spark
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./spark_scripts:/opt/spark/spark_app
+    command: ["airflow", "webserver"]
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: dockerfile.airflow
+    #image: my-airflow-spark-scheduler
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      - airflow-init
+    networks:
+      - testing-network
+    environment:
+      - AIRFLOW_UID=50000
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres:5432/postgres
+      - AIRFLOW__WEBSERVER__SECRET_KEY=yoursecretkey
+      - AIRFLOW_CONN_SPARK_STANDALONE_CLIENT=spark://spark-master:7077
+      - SPARK_HOME=/opt/spark
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./spark_scripts:/opt/spark/spark_app
+    command: ["airflow", "scheduler"]
+
+  # ------------------------------------------------------------------
+  # SPARK CLUSTER (Use dockerfile.spark)
+  # ------------------------------------------------------------------
+  spark-master:
+    #image: my-spark-master
+    build:
+      context: .
+      dockerfile: dockerfile.spark
+    container_name: spark-master
+    networks:
+      - testing-network
+    command:
+      [
+        "/bin/bash",
+        "-c",
+        "/opt/spark/sbin/start-master.sh -p 7077 -h spark-master; tail -f /dev/null",
+      ]
+    # command: -c "/opt/spark/sbin/start-master.sh -p 7077 -h spark-master; tail -f /dev/null"
+    ports:
+      - "9090:8080"
+      - "4040:4040"
+      - "7077:7077"
+    volumes:
+      - ./spark_scripts:/opt/spark/spark_app
+      - spark-events:/opt/spark/events
+    environment:
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+
+  spark-worker:
+    #image: my-spark-worker
+    build:
+      context: .
+      dockerfile: dockerfile.spark
+    container_name: spark-worker1
+    depends_on:
+      - spark-master
+    networks:
+      - testing-network
+    command:
+      [
+        "/bin/bash",
+        "-c",
+        "/opt/spark/sbin/start-worker.sh spark://spark-master:7077; tail -f /dev/null",
+      ]
+    # command: -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077; tail -f /dev/null"
+    volumes:
+      - spark-events:/opt/spark/events
+    environment:
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=4g
+
+  spark-history-server:
+    #image: my-spark-history
+    build:
+      context: .
+      dockerfile: dockerfile.spark
+    container_name: spark-history-server
+    networks:
+      - testing-network
+    command:
+      [
+        "/bin/bash",
+        "-c",
+        "/opt/spark/sbin/start-history-server.sh; tail -f /dev/null",
+      ]
+    # command: -c "/opt/spark/sbin/start-history-server.sh; tail -f /dev/null"
+    volumes:
+      - spark-events:/opt/spark/events
+    ports:
+      - "18080:18080"
+
+  # ------------------------------------------------------------------
+  # DATABASE SERVICES
+  # ------------------------------------------------------------------
+  postgres:
+    image: postgres:13
+    restart: always
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - testing-network
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+
+  pgadmin:
+    image: dpage/pgadmin4
+    networks:
+      - testing-network
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=root@root.com
+      - PGADMIN_DEFAULT_PASSWORD=root
+    ports:
+      - "8050:80"
+
+volumes:
+  spark-events:
+  pgdata:
